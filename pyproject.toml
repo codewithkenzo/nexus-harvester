@@ -1,0 +1,26 @@
+[project]
+name = "nexus-harvester"
+version = "0.1.0"
+description = "A high-performance knowledge harvesting and retrieval system for RAG applications"
+authors = [
+    {name = "Kenzo",email = "kenzo@example.com"}
+]
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi (>=0.115.12,<0.116.0)",
+    "pydantic (>=2.0.0)",
+    "uvicorn (>=0.34.2,<0.35.0)",
+    "orjson (>=3.10.18,<4.0.0)",
+    "httpx (>=0.28.1,<0.29.0)",
+    "python-dotenv (>=1.1.0,<2.0.0)",
+    "typing-extensions (>=4.8.0)",
+    "pytest (>=8.3.5,<9.0.0)",
+    "pytest-asyncio (>=0.26.0,<0.27.0)",
+    "pytest-cov (>=6.1.1,<7.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
