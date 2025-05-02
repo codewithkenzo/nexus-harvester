@@ -20,7 +20,7 @@ class DocumentMeta(BaseModel):
     title: str
     source: str
     created_at: datetime = Field(default_factory=datetime.utcnow)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional document metadata")
     
     @field_validator('url')
     @classmethod
@@ -28,8 +28,16 @@ class DocumentMeta(BaseModel):
         return v
 
 
+class IngestRequest(BaseModel):
+    """Request model for document ingestion endpoint."""
+    url: Optional[HttpUrl] = None # Make URL optional
+    title: Optional[str] = None
+    source: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
 class Chunk(BaseModel):
-    """Document chunk model."""
+    """Represents a chunk of text from a document."""
     id: UUID = Field(default_factory=uuid4)
     doc_id: UUID
     text: str

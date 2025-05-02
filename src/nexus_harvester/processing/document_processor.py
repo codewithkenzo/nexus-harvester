@@ -12,7 +12,7 @@ class DocumentProcessor:
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
     
-    async def process_document(self, doc_meta: DocumentMeta, content: str) -> List[Chunk]:
+    def process_document(self, doc_meta: DocumentMeta, content: str) -> List[Chunk]:
         """Process document and split into chunks."""
         # Basic chunking strategy - can be replaced with more sophisticated approach
         chunks = []
@@ -36,6 +36,6 @@ class DocumentProcessor:
             ))
             
             chunk_index += 1
-            start = end - self.chunk_overlap
+            start = end # Simple non-overlapping update
         
         return chunks

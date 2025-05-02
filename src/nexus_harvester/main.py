@@ -1,11 +1,21 @@
 """Main application module for the Nexus Harvester."""
 
+import logging
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import ORJSONResponse
 
 from nexus_harvester.settings import KnowledgeHarvesterSettings
+from nexus_harvester.api import api_router
+from nexus_harvester.mcp.server import mcp_server_manager
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
 
 def create_app() -> FastAPI:
@@ -27,7 +37,7 @@ def create_app() -> FastAPI:
     )
     
     # Add routes
-    # TODO: Import and include routers
+    app.include_router(api_router)
     
     # Health check
     @app.get("/health", tags=["Health"])
@@ -46,7 +56,12 @@ def start_app():
     # Create app
     app = create_app()
     
+    # Start MCP server
+    logger.info("Starting MCP server")
+    mcp_server_manager.start_server(settings)
+    
     # Start FastAPI
+    logger.info(f"Starting FastAPI application on {settings.host}:{settings.port}")
     uvicorn.run(
         app,
         host=settings.host,

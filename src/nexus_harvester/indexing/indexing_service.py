@@ -4,6 +4,7 @@ import asyncio
 import logging
 from typing import Dict, Any, List, Optional
 from uuid import UUID
+from pydantic import BaseModel
 
 from nexus_harvester.models import Chunk
 from nexus_harvester.clients.zep import ZepClient
@@ -14,8 +15,19 @@ from nexus_harvester.clients.mem0 import Mem0Client
 logger = logging.getLogger(__name__)
 
 
+class IndexingResult(BaseModel):
+    """
+    Result of indexing a document's chunks.
+    """
+    doc_id: UUID 
+    chunk_count: int
+    backends: Dict[str, Dict[str, Any]] 
+
+
 class IndexingService:
-    """Coordinate indexing to backend services."""
+    """
+    Service that takes document chunks and pushes them into one or more backends.
+    """
     
     def __init__(
         self, 
@@ -48,7 +60,7 @@ class IndexingService:
         doc_id: UUID, 
         chunks: List[Chunk],
         session_id: Optional[str] = None
-    ) -> Dict[str, Any]:
+    ) -> IndexingResult:
         """
         Index chunks in appropriate backends.
         
@@ -88,11 +100,11 @@ class IndexingService:
         if self.use_qdrant_dev:
             backends["qdrant"] = self._process_result(results[2], "Qdrant")
         
-        return {
-            "doc_id": str(doc_id),
-            "chunk_count": len(chunks),
-            "backends": backends
-        }
+        return IndexingResult(
+            doc_id=doc_id,
+            chunk_count=len(chunks),
+            backends=backends
+        )
     
     async def _index_to_zep(self, session_id: str, chunks: List[Chunk]) -> Dict[str, Any]:
         """
@@ -156,3 +168,6 @@ class IndexingService:
         
         logger.debug("%s indexing successful: %s", backend_name, result)
         return result
+
+# Ensure classes are available for import
+__all__ = ["IndexingResult", "IndexingService"]
