@@ -106,7 +106,7 @@ class IndexingService:
             Zep indexing result
         """
         logger.debug("Indexing %d chunks to Zep with session %s", len(chunks), session_id)
-        return await self.zep_client.store_memory(session_id, chunks)
+        return await self.zep_client.store_memory(session_id, chunks, None)
     
     async def _index_to_mem0(self, chunks: List[Chunk]) -> Dict[str, Any]:
         """
@@ -136,8 +136,8 @@ class IndexingService:
             return {"status": "skipped", "reason": "No Qdrant client configured"}
         
         logger.debug("Indexing %d chunks to Qdrant (dev)", len(chunks))
-        # Implementation would depend on the actual Qdrant client
-        return {"status": "indexed", "count": len(chunks)}
+        # Call the client's index_chunks method
+        return await self.qdrant_client.index_chunks(chunks)
     
     def _process_result(self, result: Any, backend_name: str) -> Dict[str, Any]:
         """
