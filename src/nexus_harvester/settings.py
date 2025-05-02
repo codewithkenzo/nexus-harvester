@@ -1,7 +1,7 @@
 """Configuration settings for the Nexus Harvester."""
 
 from typing import Optional
-from pydantic import HttpUrl, SecretStr
+from pydantic import HttpUrl, SecretStr, ConfigDict
 from pydantic_settings import BaseSettings
 
 
@@ -29,9 +29,11 @@ class KnowledgeHarvesterSettings(BaseSettings):
     # Processing settings
     chunk_size: int = 512
     chunk_overlap: int = 128
+    max_chunks_per_doc: int = 1000
     
-    class Config:
-        """Pydantic configuration."""
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = False
+    # Modern ConfigDict approach instead of class-based Config
+    model_config = ConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False
+    )

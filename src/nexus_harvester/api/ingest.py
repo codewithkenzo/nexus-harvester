@@ -3,20 +3,27 @@
 import asyncio
 from uuid import UUID, uuid4
 from typing import Dict, Any, Optional, Callable
-import logging
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 from pydantic import HttpUrl, BaseModel
 
-from ..models import DocumentMeta, IngestRequest
+from ..models import DocumentMeta, IngestRequest, ProcessingParameters
 from ..processing.document_processor import DocumentProcessor
 from ..indexing.indexing_service import IndexingService, IndexingResult
 from nexus_harvester.clients.utils import fetch_document
 from nexus_harvester.settings import KnowledgeHarvesterSettings
 from nexus_harvester.api.dependencies import get_settings
+from nexus_harvester.utils.errors import (
+    InvalidRequestError,
+    ResourceNotFoundError,
+    DependencyError,
+    ValidationError
+)
+from nexus_harvester.utils.logging import get_logger, bind_component, bind_request_id, bind_doc_id
 
-# Set up logging
-logger = logging.getLogger(__name__)
+# Set up logging with component context
+logger = get_logger(__name__)
+bind_component("api.ingest")
 
 # Create router
 router = APIRouter(prefix="", tags=["Ingestion"])
@@ -40,15 +47,30 @@ _job_store: Dict[str, Dict[str, Any]] = {}
 
 def update_job_status(job_id: str, status: str, result: Dict[str, Any] = None) -> None:
     """Update the status of a job in the job store."""
-    _job_store[job_id] = {
+    job_data = {
         "status": status,
         "result": result or {}
     }
+    _job_store[job_id] = job_data
+    
+    # Log status update
+    logger.debug(
+        "Job status updated",
+        job_id=job_id,
+        status=status,
+        has_result=bool(result)
+    )
+    return job_data
 
 
 def get_job_status(job_id: str) -> Optional[Dict[str, Any]]:
     """Get the status of a job from the job store."""
-    return _job_store.get(job_id)
+    job = _job_store.get(job_id)
+    
+    if not job:
+        logger.debug("Job not found", job_id=job_id)
+    
+    return job
 
 
 def get_indexing_service() -> IndexingService:
@@ -75,18 +97,39 @@ async def ingest_document(
     """
     job_id = str(uuid4())
     doc_id = str(uuid4())
+    
+    # Bind document ID to logging context
+    bind_doc_id(doc_id)
 
     # Validate input: require url OR content
     if not req.url and not content:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Either 'url' in the request body or 'content' query parameter must be provided."
+        logger.warning(
+            "Ingestion request missing required data",
+            job_id=job_id,
+            doc_id=doc_id,
+            has_url=bool(req.url),
+            has_content=bool(content)
         )
+        raise InvalidRequestError(
+            message="Either 'url' in the request body or 'content' query parameter must be provided.",
+            details={
+                "job_id": job_id,
+                "doc_id": doc_id,
+                "has_url": bool(req.url),
+                "has_content": bool(content)
+            }
+        )
+        
     if req.url and content:
-        print("[WARN] Both URL and content provided. Content will be ignored, fetching from URL.")
+        logger.warning(
+            "Both URL and content provided. Content will be ignored, fetching from URL.",
+            job_id=job_id,
+            doc_id=doc_id,
+            url=str(req.url)
+        )
         content = None # Prioritize URL if both are given
 
-    # Create DocumentMeta from request
+    # Create document metadata
     doc_meta = DocumentMeta(
         id=doc_id, 
         url=req.url if req.url else "local://content-provided", # Use placeholder if no URL
@@ -94,21 +137,85 @@ async def ingest_document(
         source=req.source, 
         metadata=req.metadata
     )
+    
+    # Handle processing parameters
+    processing_params = req.processing_params
+    
+    # Log processing parameter details
+    if processing_params:
+        logger.info(
+            "Custom processing parameters provided",
+            job_id=job_id,
+            doc_id=doc_id,
+            chunk_size=processing_params.chunk_size,
+            chunk_overlap=processing_params.chunk_overlap,
+            max_chunks_per_doc=processing_params.max_chunks_per_doc
+        )
+    else:
+        logger.debug(
+            "Using default processing parameters",
+            job_id=job_id,
+            doc_id=doc_id,
+            chunk_size=settings.chunk_size,
+            chunk_overlap=settings.chunk_overlap,
+            max_chunks_per_doc=settings.max_chunks_per_doc
+        )
+        
+    # Create processor with validated parameters
+    try:
+        processor = DocumentProcessor.from_processing_params(processing_params) if processing_params else DocumentProcessor(
+            chunk_size=settings.chunk_size,
+            chunk_overlap=settings.chunk_overlap,
+            max_chunks_per_doc=settings.max_chunks_per_doc
+        )
+    except ValidationError as e:
+        logger.error(
+            "Processing parameter validation failed",
+            job_id=job_id,
+            doc_id=doc_id,
+            error=str(e),
+            details=e.details if hasattr(e, 'details') else None
+        )
+        # Re-raise with job context
+        details = {
+            "job_id": job_id,
+            "doc_id": doc_id,
+        }
+        
+        # Add additional error details if available
+        if hasattr(e, 'details'):
+            details.update(e.details)
+            
+        raise ValidationError(
+            message=f"Invalid document processing parameters: {str(e)}",
+            details=details
+        )
 
     # Initialize job status
-    _job_store[job_id] = { "status": "pending", "doc_id": doc_id }
-    print(f"[API] Job {job_id} created for doc {doc_id}")
-
-    # Add background task
-    print(f"[API] Adding background task for job {job_id}")
-    background_tasks.add_task(
-        process_and_index_document, 
+    job_data = update_job_status(
         job_id=job_id, 
+        status="pending", 
+        result={"doc_id": doc_id}
+    )
+    
+    logger.info(
+        "Ingestion job created",
+        job_id=job_id,
         doc_id=doc_id,
-        doc_meta=doc_meta, 
-        content=content, # Pass content (if any) to the task
-        fetch_func=fetch_document, 
-        processor=DocumentProcessor(), # Instantiate here or depend?
+        title=req.title,
+        source=req.source,
+        is_url_based=bool(req.url)
+    )
+
+    # Start background task
+    background_tasks.add_task(
+        process_and_index_document,
+        job_id=job_id,
+        doc_id=UUID(doc_id),
+        doc_meta=doc_meta,
+        content=content,
+        fetch_func=fetch_document,
+        processor=processor,
         indexing_service=indexing_service
     )
 
@@ -118,13 +225,17 @@ async def ingest_document(
 @router.get("/status/{job_id}")
 async def get_ingestion_status(job_id: str):
     """Get the status of a document ingestion job."""
+    logger.info("Getting job status", job_id=job_id)
+    
     job = get_job_status(job_id)
     if not job:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Job not found: {job_id}"
+        logger.warning("Job status not found", job_id=job_id)
+        raise ResourceNotFoundError(
+            message=f"Job not found: {job_id}",
+            details={"job_id": job_id}
         )
     
+    logger.debug("Retrieved job status", job_id=job_id, status=job.get("status"))
     return job
 
 
@@ -132,51 +243,142 @@ async def process_and_index_document(
     job_id: str, 
     doc_id: UUID, 
     doc_meta: DocumentMeta, 
-    content: Optional[str], # Add content parameter
+    content: Optional[str],
     fetch_func: Callable[[HttpUrl], str],
     processor: DocumentProcessor,
     indexing_service: IndexingService,
 ):
     """Process and index document in background."""
-    print(f"\n[BG TASK {job_id}] Starting processing for {doc_meta.id}")
+    # Add doc_id to logging context
+    bind_doc_id(str(doc_id))
+    
+    logger.info(
+        "Starting background document processing",
+        job_id=job_id,
+        doc_id=str(doc_id),
+        title=doc_meta.title,
+        source=doc_meta.source
+    )
+    
     try:
-        logger.info(f"Processing document: {doc_meta.title} (ID: {doc_meta.id})")
+        # Update job status to processing
         update_job_status(job_id, "processing")
-        print(f"[BG TASK {job_id}] Status updated to processing")
         
         # Fetch content if not provided directly
         if content is None:
-            print(f"[BG TASK {job_id}] Fetching content from {doc_meta.url}")
-            content = await fetch_func(doc_meta.url)
-            print(f"[BG TASK {job_id}] Content fetched: {content[:100]}...") # Log snippet
+            logger.info(
+                "Fetching document content",
+                job_id=job_id,
+                url=str(doc_meta.url)
+            )
+            try:
+                content = await fetch_func(doc_meta.url)
+                content_preview = content[:100] + "..." if len(content) > 100 else content
+                logger.debug(
+                    "Content fetched successfully",
+                    job_id=job_id,
+                    content_length=len(content),
+                    content_preview=content_preview
+                )
+            except Exception as fetch_error:
+                logger.error(
+                    "Failed to fetch document content",
+                    job_id=job_id,
+                    url=str(doc_meta.url),
+                    error=str(fetch_error),
+                    exc_info=True
+                )
+                raise DependencyError(
+                    message=f"Failed to fetch document from URL: {str(fetch_error)}",
+                    details={
+                        "job_id": job_id,
+                        "doc_id": str(doc_id),
+                        "url": str(doc_meta.url),
+                        "error": str(fetch_error)
+                    }
+                )
         else:
-            print(f"[BG TASK {job_id}] Using provided content: {content[:100]}...")
+            content_preview = content[:100] + "..." if len(content) > 100 else content
+            logger.debug(
+                "Using provided content",
+                job_id=job_id,
+                content_length=len(content),
+                content_preview=content_preview
+            )
 
-        # Process document (synchronous)
-        print(f"[BG TASK {job_id}] Instantiating DocumentProcessor") # Should already be instantiated
-        # processor = DocumentProcessor() # Don't reinstantiate if passed in
-        chunks = processor.process_document(doc_meta, content)
-        print(f"[BG TASK {job_id}] processor.process_document completed. Found {len(chunks)} chunks.")
-        print(f"[BG TASK {job_id}] Document processed into {len(chunks)} chunks")
+        # Process document (chunking)
+        logger.info(
+            "Processing document into chunks",
+            job_id=job_id,
+            doc_id=str(doc_id)
+        )
+        
+        try:
+            chunks = processor.process_document(doc_meta, content)
+            logger.info(
+                "Document processed successfully",
+                job_id=job_id,
+                doc_id=str(doc_id),
+                chunk_count=len(chunks)
+            )
+        except Exception as process_error:
+            logger.error(
+                "Error processing document",
+                job_id=job_id,
+                doc_id=str(doc_id),
+                error=str(process_error),
+                exc_info=True
+            )
+            update_job_status(job_id, "failed", {"error": f"Processing error: {str(process_error)}"})
+            raise
         
         # Index chunks
-        logger.info(f"Indexing {len(chunks)} chunks for document: {doc_meta.title}")
-        update_job_status(job_id, "indexing")
-        print(f"[BG TASK {job_id}] Getting indexing service")
-        result: IndexingResult = await indexing_service.index_chunks(
-            doc_id=doc_meta.id,
-            chunks=chunks
+        logger.info(
+            "Indexing document chunks",
+            job_id=job_id,
+            doc_id=str(doc_id),
+            chunk_count=len(chunks)
         )
-        print(f"[BG TASK {job_id}] Indexing completed. Result: {result}")
+        update_job_status(job_id, "indexing")
         
-        # Update job status
-        logger.info(f"Completed processing document: {doc_meta.title}")
-        update_job_status(job_id, "completed", result.model_dump()) # Dump model to dict for storage
-        print(f"[BG TASK {job_id}] Job status updated to completed")
+        try:
+            result: IndexingResult = await indexing_service.index_chunks(
+                doc_id=doc_meta.id,
+                chunks=chunks
+            )
+            
+            logger.info(
+                "Indexing completed successfully",
+                job_id=job_id,
+                doc_id=str(doc_id),
+                index_count=result.indexed_count,
+                backends=result.backends
+            )
+            
+            # Update job status with result
+            update_job_status(job_id, "completed", result.model_dump())
+            
+        except Exception as index_error:
+            logger.error(
+                "Indexing failed",
+                job_id=job_id,
+                doc_id=str(doc_id),
+                error=str(index_error),
+                exc_info=True
+            )
+            update_job_status(job_id, "failed", {"error": f"Indexing error: {str(index_error)}"})
+            raise
     
     except Exception as e:
-        # Handle errors
-        logger.error(f"Error processing document: {str(e)}", exc_info=True)
-        print(f"[BG TASK {job_id}] Exception occurred: {str(e)}")
-        update_job_status(job_id, "failed", {"error": str(e)})
-        print(f"[BG TASK {job_id}] Job status updated to failed")
+        # Handle any other unexpected errors
+        logger.error(
+            "Unexpected error during document processing",
+            job_id=job_id,
+            doc_id=str(doc_id),
+            error=str(e),
+            error_type=type(e).__name__,
+            exc_info=True
+        )
+        update_job_status(job_id, "failed", {"error": str(e), "error_type": type(e).__name__})
+        
+        # No need to re-raise as this is a background task
