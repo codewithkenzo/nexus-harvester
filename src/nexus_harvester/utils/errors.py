@@ -151,7 +151,10 @@ async def nexus_harvester_exception_handler(
     request: Request, 
     exc: NexusHarvesterError
 ) -> JSONResponse:
-    """Handle custom Nexus Harvester exceptions."""
+    """Handle custom Nexus Harvester exceptions.
+    
+    Compatible with FastAPI exception handler type requirements.
+    """
     # Get environment from settings (later can be injected)
     # For now hardcoded to development
     is_dev = True
@@ -196,9 +199,17 @@ async def validation_exception_handler(request: Request, exc: ValidationError) -
 
 def register_exception_handlers(app: FastAPI) -> None:
     """Register all exception handlers with FastAPI application."""
-    # Register handlers for custom exceptions
-    app.add_exception_handler(NexusHarvesterError, nexus_harvester_exception_handler)
-    app.add_exception_handler(ValidationError, validation_exception_handler)
+    # Register handlers for custom exceptions - with type cast for mypy compatibility
+    from typing import cast, Callable, Awaitable
+    from fastapi.types import Exc, ExcHandlerFunc
+    
+    # Type cast our handlers to make FastAPI/mypy happy
+    nexus_handler = cast(ExcHandlerFunc, nexus_harvester_exception_handler)
+    validation_handler = cast(ExcHandlerFunc, validation_exception_handler)
+    
+    # Register our handlers with the app
+    app.add_exception_handler(NexusHarvesterError, nexus_handler)
+    app.add_exception_handler(ValidationError, validation_handler)
     
     # Register handler for FastAPI's RequestValidationError
     # This converts FastAPI's validation errors to our custom format
