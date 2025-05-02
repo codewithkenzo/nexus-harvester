@@ -209,6 +209,9 @@ class DocumentProcessor:
 from typing import List, Dict, Any
 import asyncio
 from uuid import UUID
+import logging
+
+logger = logging.getLogger(__name__)
 
 class IndexingService:
     """Coordinate indexing to backend services."""
@@ -218,41 +221,78 @@ class IndexingService:
         self.mem0_client = mem0_client
         self.qdrant_client = qdrant_client
         self.use_qdrant_dev = use_qdrant_dev
+        
+        # Log initialization
+        logger.info(
+            "IndexingService initialized with backends: Zep, Mem0%s", 
+            ", Qdrant (dev)" if use_qdrant_dev else ""
+        )
     
     async def index_chunks(self, doc_id: UUID, chunks: List[Chunk], 
-                          session_id: str = None) -> Dict[str, Any]:
+                           session_id: str = None) -> Dict[str, Any]:
         """Index chunks in appropriate backends."""
         # Use session_id or generate from doc_id
         session_id = session_id or f"doc-{doc_id}"
         
+        logger.info(
+            "Indexing %d chunks for document %s with session %s", 
+            len(chunks), doc_id, session_id
+        )
+        
+        # Create tasks for parallel processing
+        zep_task = self._index_to_zep(session_id, chunks)
+        mem0_task = self._index_to_mem0(chunks)
+        qdrant_task = self._index_to_qdrant(chunks) if self.use_qdrant_dev else asyncio.sleep(0)
+        
         # Process in parallel
         results = await asyncio.gather(
-            # Memory/Graph operations go to Zep
-            self.zep_client.store_memory(session_id, chunks),
-            # Search operations go to Mem0
-            self.mem0_client.index_chunks(chunks),
-            # Dev-only operations
-            self._index_dev(chunks) if self.use_qdrant_dev else asyncio.sleep(0)
+            zep_task, mem0_task, qdrant_task, 
+            return_exceptions=True  # Don't let one failure stop others
         )
+        
+        # Process results, handling any exceptions
+        backends = {
+            "zep": self._process_result(results[0], "Zep"),
+            "mem0": self._process_result(results[1], "Mem0"),
+        }
+        
+        if self.use_qdrant_dev:
+            backends["qdrant"] = self._process_result(results[2], "Qdrant")
         
         return {
             "doc_id": str(doc_id),
             "chunk_count": len(chunks),
-            "backends": {
-                "zep": results[0],
-                "mem0": results[1],
-                "qdrant": results[2] if self.use_qdrant_dev else None
-            }
+            "backends": backends
         }
     
-    async def _index_dev(self, chunks: List[Chunk]) -> Dict[str, Any]:
-        """Development-only indexing to Qdrant."""
+    async def _index_to_zep(self, session_id: str, chunks: List[Chunk]) -> Dict[str, Any]:
+        """Index chunks to Zep memory."""
+        logger.debug("Indexing %d chunks to Zep with session %s", len(chunks), session_id)
+        return await self.zep_client.store_memory(session_id, chunks, None)
+    
+    async def _index_to_mem0(self, chunks: List[Chunk]) -> Dict[str, Any]:
+        """Index chunks to Mem0 search."""
+        logger.debug("Indexing %d chunks to Mem0", len(chunks))
+        return await self.mem0_client.index_chunks(chunks)
+    
+    async def _index_to_qdrant(self, chunks: List[Chunk]) -> Dict[str, Any]:
+        """Index chunks to Qdrant (development only)."""
         if not self.qdrant_client:
+            logger.warning("Qdrant indexing requested but no client configured")
             return {"status": "skipped", "reason": "No Qdrant client configured"}
-            
-        # Implementation for dev-only Qdrant indexing
-        return {"status": "indexed", "count": len(chunks)}
-```
+        
+        logger.debug("Indexing %d chunks to Qdrant (dev)", len(chunks))
+        # Call the client's index_chunks method
+        return await self.qdrant_client.index_chunks(chunks)
+        
+    def _process_result(self, result: Any, backend_name: str) -> Dict[str, Any]:
+        """Process and normalize backend results, handling exceptions."""
+        if isinstance(result, Exception):
+            logger.error("Error indexing to %s: %s", backend_name, str(result))
+            return {"error": str(result), "status": "failed"}
+        
+        logger.debug("%s indexing successful: %s", backend_name, result)
+        return result
 
 ## API Endpoints
 
