@@ -8,6 +8,8 @@ from fastapi.responses import ORJSONResponse
 from nexus_harvester.settings import KnowledgeHarvesterSettings
 from nexus_harvester.api import api_router
 from nexus_harvester.mcp.server import mcp_server_manager
+from nexus_harvester.middleware.rate_limiting import add_rate_limiting
+from nexus_harvester.utils.rate_limiting import RateLimitConfig
 from nexus_harvester.utils.logging import setup_logging, get_logger, LogConfig, RequestLoggingMiddleware, bind_component
 
 # Configure structured logging
@@ -39,6 +41,32 @@ def create_app() -> FastAPI:
     
     # Add request logging middleware
     app.middleware("http")(RequestLoggingMiddleware())
+    
+    # Get settings
+    settings = KnowledgeHarvesterSettings()
+    
+    # Add rate limiting middleware
+    if settings.rate_limit.enabled:
+        logger.info(
+            "Configuring rate limiting middleware",
+            tokens_per_second=settings.rate_limit.tokens_per_second,
+            bucket_size=settings.rate_limit.bucket_size,
+            component="middleware",
+            operation="configure_rate_limiting"
+        )
+        
+        # Create config from settings
+        rate_config = RateLimitConfig(
+            tokens_per_second=settings.rate_limit.tokens_per_second,
+            bucket_size=settings.rate_limit.bucket_size
+        )
+        
+        # Add middleware
+        add_rate_limiting(
+            app=app, 
+            config=rate_config,
+            exclude_paths=settings.rate_limit.excluded_paths
+        )
     
     # Add routes
     app.include_router(api_router)
