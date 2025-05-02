@@ -11,7 +11,7 @@ from pydantic import SecretStr
 from nexus_harvester.models import Chunk, DocumentMeta
 from nexus_harvester.clients.zep import ZepClient
 from nexus_harvester.clients.mem0 import Mem0Client
-from nexus_harvester.indexing.indexing_service import IndexingService
+from nexus_harvester.indexing.indexing_service import IndexingService, IndexingResult
 
 
 @pytest.fixture
@@ -75,12 +75,12 @@ class TestIndexingService:
         result = await service.index_chunks(doc_id, test_chunks)
         
         # Assert
-        assert result["doc_id"] == str(doc_id)
-        assert result["chunk_count"] == len(test_chunks)
-        assert "zep" in result["backends"]
-        assert "mem0" in result["backends"]
-        assert result["backends"]["zep"]["status"] == "success"
-        assert result["backends"]["mem0"]["status"] == "indexed"
+        assert result.doc_id == doc_id  # Now comparing UUID objects directly
+        assert result.chunk_count == len(test_chunks)
+        assert "zep" in result.backends
+        assert "mem0" in result.backends
+        assert result.backends["zep"]["status"] == "success"
+        assert result.backends["mem0"]["status"] == "indexed"
         
         # Verify client calls
         mock_zep_client.store_memory.assert_called_once()
@@ -101,7 +101,7 @@ class TestIndexingService:
         result = await service.index_chunks(doc_id, test_chunks, session_id=session_id)
         
         # Assert
-        assert result["doc_id"] == str(doc_id)
+        assert result.doc_id == doc_id  # Now comparing UUID objects directly
         
         # Verify session ID was used
         mock_zep_client.store_memory.assert_called_once_with(
@@ -125,8 +125,8 @@ class TestIndexingService:
         result = await service.index_chunks(doc_id, test_chunks)
         
         # Assert
-        assert "qdrant" in result["backends"]
-        assert result["backends"]["qdrant"]["status"] == "indexed"
+        assert "qdrant" in result.backends
+        assert result.backends["qdrant"]["status"] == "indexed"
         
         # Verify Qdrant client was called
         mock_qdrant_client.index_chunks.assert_called_once()
@@ -148,9 +148,9 @@ class TestIndexingService:
         result = await service.index_chunks(doc_id, test_chunks)
         
         # Assert
-        assert "qdrant" in result["backends"]
-        assert result["backends"]["qdrant"]["status"] == "skipped"
-        assert "No Qdrant client configured" in result["backends"]["qdrant"]["reason"]
+        assert "qdrant" in result.backends
+        assert result.backends["qdrant"]["status"] == "skipped"
+        assert "No Qdrant client configured" in result.backends["qdrant"]["reason"]
 
     @pytest.mark.asyncio
     async def test_index_chunks_error_handling(self, doc_id, test_chunks, mock_zep_client, mock_mem0_client):
@@ -168,9 +168,9 @@ class TestIndexingService:
         result = await service.index_chunks(doc_id, test_chunks)
         
         # Assert
-        assert result["doc_id"] == str(doc_id)
-        assert "error" in result["backends"]["zep"]
-        assert "Zep connection error" in result["backends"]["zep"]["error"]
+        assert result.doc_id == doc_id  # Now comparing UUID objects directly
+        assert "error" in result.backends["zep"]
+        assert "Zep connection error" in result.backends["zep"]["error"]
         
         # Mem0 should still be called even if Zep fails
         mock_mem0_client.index_chunks.assert_called_once_with(test_chunks)

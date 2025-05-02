@@ -25,6 +25,8 @@ The Nexus Harvester is our core ingestion, chunking, and search service that pro
 - Pydantic model validation throughout the pipeline
 - Async processing for high-throughput operations
 - MCP tool interfaces for agent integration
+- Structured logging with context tracking
+- Dual backend architecture (Zep + Mem0)
 
 ## API Endpoints
 
@@ -50,6 +52,7 @@ nexus_harvester/
 │   │   ├── indexing/       # Indexing to backends
 │   │   ├── search/         # Search implementation
 │   │   ├── mcp/            # MCP tool definitions
+│   │   ├── utils/          # Utility modules (logging, etc.)
 │   │   ├── models.py       # Core data models
 │   │   ├── settings.py     # Application settings
 │   │   └── main.py         # Main application entry point
@@ -122,12 +125,13 @@ Current status of implementation (2025-05-02):
 |---------|--------|----------|-------|
 | Project Setup | Completed | 100% | Basic structure and dependencies |
 | Core Models | Completed | 100% | Document and Chunk models implemented |
-| Zep Integration | In Progress | 40% | Client interface implemented |
-| Mem0 Integration | In Progress | 40% | Client interface implemented |
+| Zep Integration | In Progress | 80% | Client interface and testing |
+| Mem0 Integration | In Progress | 80% | Client interface and testing |
 | Document Processing | In Progress | 30% | Basic chunking implemented |
-| Indexing Service | In Progress | 70% | Implementation and tests created |
-| REST API Endpoints | Completed | 100% | Ingestion and search endpoints implemented |
-| MCP Tools | Completed | 100% | Agent integration tools implemented |
+| Indexing Service | In Progress | 95% | Implementation, testing, and comprehensive logging |
+| Logging System | In Progress | 90% | Structured logging with context variables |
+| REST API Endpoints | Completed | 70% | Ingestion and search endpoints implemented |
+| MCP Tools | In Progress | 60% | Initial implementation |
 | Testing Suite | In Progress | 60% | Unit tests for IndexingService, API, and MCP tools |
 
 ## TODO List
@@ -140,6 +144,10 @@ Current status of implementation (2025-05-02):
 - [x] Create REST API endpoints for document ingestion
 - [x] Create REST API endpoints for search
 - [x] Implement MCP tools for agent integration
+- [x] Implement comprehensive structured logging
+- [ ] Complete error handling in API endpoints
+- [ ] Implement validation for document processing parameters
+- [ ] Add rate limiting for API endpoints
 - [ ] Complete comprehensive test suite
 - [ ] Set up CI/CD pipeline
 - [ ] Create Docker deployment configuration

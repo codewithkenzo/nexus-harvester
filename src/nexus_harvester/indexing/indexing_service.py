@@ -1,7 +1,6 @@
 """Indexing service for coordinating backend operations."""
 
 import asyncio
-import logging
 from typing import Dict, Any, List, Optional
 from uuid import UUID
 from pydantic import BaseModel
@@ -9,10 +8,10 @@ from pydantic import BaseModel
 from nexus_harvester.models import Chunk
 from nexus_harvester.clients.zep import ZepClient
 from nexus_harvester.clients.mem0 import Mem0Client
+from nexus_harvester.utils.logging import get_logger, bind_doc_id, bind_session_id, bind_component
 
-
-# Configure logger
-logger = logging.getLogger(__name__)
+# Configure structured logger
+logger = get_logger(__name__)
 
 
 class IndexingResult(BaseModel):
@@ -50,9 +49,19 @@ class IndexingService:
         self.qdrant_client = qdrant_client
         self.use_qdrant_dev = use_qdrant_dev
         
+        # Bind component context for initialization logs
+        bind_component("indexing_service")
+        
+        # Log service initialization with structured data
+        backends = ["zep", "mem0"]
+        if use_qdrant_dev:
+            backends.append("qdrant_dev")
+            
         logger.info(
-            "IndexingService initialized with backends: Zep, Mem0%s", 
-            ", Qdrant (dev)" if use_qdrant_dev else ""
+            "IndexingService initialized",
+            backends=backends,
+            use_qdrant_dev=use_qdrant_dev,
+            operation="__init__"
         )
     
     async def index_chunks(
@@ -75,9 +84,17 @@ class IndexingService:
         # Use session_id or generate from doc_id
         session_id = session_id or f"doc-{doc_id}"
         
+        # Bind context information for all subsequent logs in this call
+        bind_doc_id(str(doc_id))
+        bind_session_id(session_id)
+        bind_component("indexing_service")
+        
         logger.info(
-            "Indexing %d chunks for document %s with session %s", 
-            len(chunks), doc_id, session_id
+            "Started indexing chunks",
+            chunk_count=len(chunks),
+            doc_id=str(doc_id),
+            session_id=session_id,
+            operation="index_chunks"
         )
         
         # Create tasks for parallel processing
@@ -117,7 +134,13 @@ class IndexingService:
         Returns:
             Zep indexing result
         """
-        logger.debug("Indexing %d chunks to Zep with session %s", len(chunks), session_id)
+        logger.debug(
+            "Indexing chunks to Zep", 
+            backend="zep",
+            chunk_count=len(chunks), 
+            session_id=session_id,
+            operation="_index_to_zep"
+        )
         return await self.zep_client.store_memory(session_id, chunks, None)
     
     async def _index_to_mem0(self, chunks: List[Chunk]) -> Dict[str, Any]:
@@ -130,7 +153,12 @@ class IndexingService:
         Returns:
             Mem0 indexing result
         """
-        logger.debug("Indexing %d chunks to Mem0", len(chunks))
+        logger.debug(
+            "Indexing chunks to Mem0", 
+            backend="mem0",
+            chunk_count=len(chunks),
+            operation="_index_to_mem0"
+        )
         return await self.mem0_client.index_chunks(chunks)
     
     async def _index_to_qdrant(self, chunks: List[Chunk]) -> Dict[str, Any]:
@@ -144,10 +172,21 @@ class IndexingService:
             Qdrant indexing result or error message
         """
         if not self.qdrant_client:
-            logger.warning("Qdrant indexing requested but no client configured")
+            logger.warning(
+                "Qdrant indexing requested but no client configured",
+                backend="qdrant",
+                operation="_index_to_qdrant",
+                status="skipped"
+            )
             return {"status": "skipped", "reason": "No Qdrant client configured"}
         
-        logger.debug("Indexing %d chunks to Qdrant (dev)", len(chunks))
+        logger.debug(
+            "Indexing chunks to Qdrant (dev)",
+            backend="qdrant", 
+            chunk_count=len(chunks),
+            operation="_index_to_qdrant",
+            mode="development"
+        )
         # Call the client's index_chunks method
         return await self.qdrant_client.index_chunks(chunks)
     
@@ -163,10 +202,24 @@ class IndexingService:
             Processed result or error information
         """
         if isinstance(result, Exception):
-            logger.error("Error indexing to %s: %s", backend_name, str(result))
+            logger.error(
+                "Indexing operation failed", 
+                backend=backend_name,
+                error=str(result),
+                error_type=type(result).__name__,
+                status="failed",
+                operation="_process_result"
+            )
             return {"error": str(result), "status": "failed"}
         
-        logger.debug("%s indexing successful: %s", backend_name, result)
+        logger.debug(
+            "Indexing operation successful", 
+            backend=backend_name,
+            status="success",
+            operation="_process_result",
+            # Avoid logging potentially large result objects
+            # result_type=type(result).__name__
+        )
         return result
 
 # Ensure classes are available for import

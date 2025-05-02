@@ -1,6 +1,5 @@
 """Main application module for the Nexus Harvester."""
 
-import logging
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,13 +8,15 @@ from fastapi.responses import ORJSONResponse
 from nexus_harvester.settings import KnowledgeHarvesterSettings
 from nexus_harvester.api import api_router
 from nexus_harvester.mcp.server import mcp_server_manager
+from nexus_harvester.utils.logging import setup_logging, get_logger, LogConfig, RequestLoggingMiddleware, bind_component
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+# Configure structured logging
+setup_logging(LogConfig(
+    ENVIRONMENT="development",  # Change to production in prod environment
+    LOG_LEVEL="INFO",
+    JSON_LOGS=False  # Set to True in production
+))
+logger = get_logger(__name__)
 
 
 def create_app() -> FastAPI:
@@ -36,6 +37,9 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     
+    # Add request logging middleware
+    app.middleware("http")(RequestLoggingMiddleware())
+    
     # Add routes
     app.include_router(api_router)
     
@@ -53,15 +57,29 @@ def start_app():
     # Get settings
     settings = KnowledgeHarvesterSettings()
     
+    # Bind component for service startup logs
+    bind_component("service")
+    
     # Create app
     app = create_app()
     
     # Start MCP server
-    logger.info("Starting MCP server")
+    logger.info(
+        "Starting MCP server",
+        component="mcp_server",
+        port=settings.mcp_port,
+        operation="start_server"
+    )
     mcp_server_manager.start_server(settings)
     
     # Start FastAPI
-    logger.info(f"Starting FastAPI application on {settings.host}:{settings.port}")
+    logger.info(
+        "Starting API server", 
+        host=settings.host,
+        port=settings.port,
+        component="api_server",
+        operation="start_server"
+    )
     uvicorn.run(
         app,
         host=settings.host,
