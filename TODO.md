@@ -45,6 +45,8 @@
 - [ ] Refactor client code for better error handling (deadline: 2025-05-12)
 - [ ] Improve code documentation and type hints (deadline: 2025-05-10)
 - [ ] Set up E2E testing environment (deadline: 2025-05-15)
+- [ ] Implement strict dependency versioning across stacks (Python, npm, AUR) (deadline: 2025-05-07)
+- [ ] Automate dependency audits using pip-audit in CI/CD (deadline: 2025-05-05)
 
 ## Next Steps (Immediate Action Items)
 1. ✅ Implement comprehensive logging in the indexing pipeline (completed 2025-05-02)
@@ -53,3 +55,22 @@
 4. Complete the remaining error handling in API endpoints (GitHub issue #2, deadline: 2025-05-04)
 5. Add rate limiting for API endpoints (deadline: 2025-05-05)
 6. Thoroughly test the document ingestion API endpoint
+
+## Innovation & Feature Development (2025-05-08+)
+1. [ ] Develop crawl4ai MCP server for documentation fetching (deadline: 2025-05-15)
+   - Automated documentation extraction from Python packages
+   - Integration with Pydantic for schema conversion
+   - Support for multi-format document crawling (RST, MD, HTML)
+   - Versioning awareness with semantic understanding
+
+2. [ ] Implement dependency-tracker MCP server (deadline: 2025-05-20)
+   - Cross-stack dependency resolution (Python, npm, AUR packages)
+   - Vulnerability scanning and SCA integration
+   - Version compatibility matrix generation
+   - Policy enforcement for dependency management
+
+3. [ ] Build processing-pipeline MCP server with custom chunking algorithms (deadline: 2025-05-25)
+   - Content-aware chunking strategies
+   - Domain-specific document parsing
+   - Metadata extraction and enrichment
+   - Hierarchical document representation
